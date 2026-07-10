@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "id": "opentable-booking-uses-explicit-signed-in-chrome-attach",
+  "applied_at": "2026-07-10",
+  "base_run_id": "20260509-110540",
+  "base_printing_press_version": "4.2.2",
+  "summary": "OpenTable booking prefers an explicitly configured signed-in Chrome attachment, checks only required booking-form agreements, and reports sanitized typed failures when the final form does not navigate.",
+  "reason": "Akamai blocks the Surf make-reservation write even when browser reads work, and OpenTable can render a transient signed-out venue shell or omit native required metadata from restaurant-terms checkboxes. Regeneration must retain the bounded venue refresh, form-scoped agreement handling, and typed attach diagnostics without selecting optional marketing controls or logging browser credentials.",
+  "files": [
+    "internal/source/opentable/chrome_book.go",
+    "internal/source/opentable/chrome_book_test.go",
+    "internal/source/opentable/booking.go",
+    "internal/source/opentable/booking_test.go",
+    "internal/cli/book.go",
+    "internal/cli/book_test.go"
+  ],
+  "validated_outcome": "Live attach checked the required restaurant-terms agreement, confirmed Brewery Bhavana for party 2 at 2026-07-11 20:30, and the signed-in dining dashboard showed the venue, date, and time; no confirmation number was visible."
+}

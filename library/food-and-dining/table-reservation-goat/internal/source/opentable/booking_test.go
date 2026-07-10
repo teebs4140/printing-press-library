@@ -83,3 +83,70 @@ func TestPersistedHashesAreSet(t *testing.T) {
 		t.Errorf("BookingConfirmationHash = %q (len %d); expected 64-char SHA256", BookingConfirmationHash, len(BookingConfirmationHash))
 	}
 }
+
+func TestUpcomingReservationsFromInitialState_LegacyRootShape(t *testing.T) {
+	want := []any{map[string]any{"confirmationNumber": float64(12345)}}
+	state := map[string]any{
+		"diningDashboard": map[string]any{"upcomingReservations": want},
+	}
+	got, err := upcomingReservationsFromInitialState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.([]any)) != 1 {
+		t.Fatalf("legacy reservations = %#v", got)
+	}
+}
+
+func TestUpcomingReservationsFromInitialState_NestedCurrentShape(t *testing.T) {
+	want := []any{map[string]any{"confirmationNumber": float64(67890)}}
+	state := map[string]any{
+		"authentication": map[string]any{"isAuthenticated": true},
+		"routeState": map[string]any{
+			"diningHistory": map[string]any{"upcomingReservations": want},
+		},
+	}
+	got, err := upcomingReservationsFromInitialState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.([]any)) != 1 {
+		t.Fatalf("nested reservations = %#v", got)
+	}
+}
+
+func TestUpcomingReservationsFromInitialState_AnonymousCurrentShapeIsAuthExpired(t *testing.T) {
+	state := map[string]any{
+		"authentication": map[string]any{"isAuthenticated": false},
+		"header":         map[string]any{"userTransactions": []any{}},
+	}
+	_, err := upcomingReservationsFromInitialState(state)
+	if !errors.Is(err, ErrAuthExpired) {
+		t.Fatalf("error = %v, want ErrAuthExpired", err)
+	}
+}
+
+func TestUpcomingReservationsFromInitialState_AuthenticatedMissingLeafCanary(t *testing.T) {
+	state := map[string]any{
+		"authentication": map[string]any{"isAuthenticated": true},
+		"header":         map[string]any{"userTransactions": []any{}},
+	}
+	_, err := upcomingReservationsFromInitialState(state)
+	if !errors.Is(err, ErrCanaryUnrecognizedBody) {
+		t.Fatalf("error = %v, want ErrCanaryUnrecognizedBody", err)
+	}
+}
+
+func TestFindMapByExactKeySupportsNestedUserProfile(t *testing.T) {
+	state := map[string]any{
+		"page": map[string]any{
+			"header": map[string]any{
+				"userProfile": map[string]any{"firstName": "Test"},
+			},
+		},
+	}
+	profile, ok := findMapByExactKey(state, "userProfile", 0)
+	if !ok || profile["firstName"] != "Test" {
+		t.Fatalf("nested profile = %#v, ok=%v", profile, ok)
+	}
+}

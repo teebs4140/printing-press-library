@@ -253,7 +253,24 @@ session still work.**
    paths are blocked, the agent should hand the user the URL so they can
    click through to OpenTable directly.
 
-### No `error_kind` field (Tock errors, non-WAF errors)
+### OpenTable attach-booking errors
+
+When `TABLE_RESERVATION_GOAT_OT_CHROME_DEBUG_URL` is set, `book opentable:...`
+uses a fresh tab in the attached Chrome profile. That profile must already be
+signed in to opentable.com. The booking command returns these typed errors:
+
+- `attach_unreachable` — the configured DevTools endpoint cannot be reached.
+- `not_signed_in` — a fresh target does not share a signed-in OpenTable session.
+- `selector_drift` — the expected slot/details/final-confirm UI was not found;
+  `hint` includes a sanitized `page_state` snapshot without URL query tokens.
+- `slot_taken` — the requested slot disappeared or became disabled.
+
+Use `TRG_ALLOW_BOOK=prepare` for a safe pre-confirm check: it drives through
+the exact slot and verifies the final control is enabled, but never clicks it.
+Only `TRG_ALLOW_BOOK=1` permits the final confirmation click. If the debug env
+is absent, OpenTable keeps the existing HTTP booking fallback.
+
+### No `error_kind` field (other Tock errors, non-WAF errors)
 
 Tock doesn't have a Kind discriminator yet — its errors arrive as plain
 text in `reason`. The reason strings name the upstream condition
@@ -305,7 +322,10 @@ Compose the cross-network search with a follow-up live availability check — `g
 
 ## Auth Setup
 
-No authentication required.
+Search and availability require no account. OpenTable attach booking requires
+the attached Chrome profile to be signed in to opentable.com; Tock attach
+booking similarly uses the profile's Tock session. Resy booking uses its saved
+API token.
 
 Run `table-reservation-goat-pp-cli doctor` to verify setup.
 

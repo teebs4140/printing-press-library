@@ -442,20 +442,17 @@ func (c *Client) Cancel(ctx context.Context, req CancelRequest) (*CancelResponse
 }
 
 // ListUpcomingReservations fetches the user's upcoming reservations from
-// /user/dining-dashboard SSR. Returns a slice mapped from
-// __INITIAL_STATE__.diningDashboard.upcomingReservations[].
+// /user/dining-dashboard SSR. OpenTable has moved the dashboard reducer
+// within __INITIAL_STATE__ over time, so the root-level legacy shape is tried
+// first and an exact-key recursive fallback handles nested reducer wrappers.
 func (c *Client) ListUpcomingReservations(ctx context.Context) ([]UpcomingReservation, error) {
 	state, err := c.fetchDiningDashboardState(ctx)
 	if err != nil {
 		return nil, err
 	}
-	dd, ok := state["diningDashboard"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("%w: diningDashboard slice missing from __INITIAL_STATE__", ErrCanaryUnrecognizedBody)
-	}
-	rawList, ok := dd["upcomingReservations"]
-	if !ok || rawList == nil {
-		return []UpcomingReservation{}, nil
+	rawList, err := upcomingReservationsFromInitialState(state)
+	if err != nil {
+		return nil, err
 	}
 	listJSON, err := json.Marshal(rawList)
 	if err != nil {
@@ -475,9 +472,15 @@ func (c *Client) MyProfile(ctx context.Context) (*MyProfile, error) {
 	if err != nil {
 		return nil, err
 	}
+	if authenticated, known := initialStateAuthentication(state); known && !authenticated {
+		return nil, ErrAuthExpired
+	}
 	up, ok := state["userProfile"].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("%w: userProfile slice missing from __INITIAL_STATE__", ErrCanaryUnrecognizedBody)
+		up, ok = findMapByExactKey(state, "userProfile", 0)
+	}
+	if !ok {
+		return nil, fmt.Errorf("%w: userProfile missing from __INITIAL_STATE__", ErrCanaryUnrecognizedBody)
 	}
 	prof := &MyProfile{}
 	if v, ok := up["firstName"].(string); ok {
@@ -502,6 +505,74 @@ func (c *Client) MyProfile(ctx context.Context) (*MyProfile, error) {
 		prof.PhoneNumberCountryID = "US"
 	}
 	return prof, nil
+}
+
+func upcomingReservationsFromInitialState(state map[string]any) (any, error) {
+	if authenticated, known := initialStateAuthentication(state); known && !authenticated {
+		return nil, ErrAuthExpired
+	}
+	// Legacy (May 2026): root reducer.
+	if dd, ok := state["diningDashboard"].(map[string]any); ok {
+		if raw, exists := dd["upcomingReservations"]; exists {
+			if raw == nil {
+				return []any{}, nil
+			}
+			return raw, nil
+		}
+	}
+	// Current reducer wrappers may nest the same exact data key under a page,
+	// dashboard, or route-state object. Match the semantic leaf rather than a
+	// guessed wrapper name; do not accept broad "transactions" arrays whose
+	// schema may represent rewards rather than reservations.
+	if raw, ok := findValueByExactKey(state, "upcomingReservations", 0); ok {
+		if raw == nil {
+			return []any{}, nil
+		}
+		return raw, nil
+	}
+	return nil, fmt.Errorf("%w: upcomingReservations missing from __INITIAL_STATE__", ErrCanaryUnrecognizedBody)
+}
+
+func initialStateAuthentication(state map[string]any) (authenticated, known bool) {
+	authState, ok := state["authentication"].(map[string]any)
+	if !ok {
+		return false, false
+	}
+	value, ok := authState["isAuthenticated"].(bool)
+	return value, ok
+}
+
+func findMapByExactKey(value any, key string, depth int) (map[string]any, bool) {
+	found, ok := findValueByExactKey(value, key, depth)
+	if !ok {
+		return nil, false
+	}
+	m, ok := found.(map[string]any)
+	return m, ok
+}
+
+func findValueByExactKey(value any, key string, depth int) (any, bool) {
+	if depth > 10 {
+		return nil, false
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		if found, ok := typed[key]; ok {
+			return found, true
+		}
+		for _, child := range typed {
+			if found, ok := findValueByExactKey(child, key, depth+1); ok {
+				return found, true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if found, ok := findValueByExactKey(child, key, depth+1); ok {
+				return found, true
+			}
+		}
+	}
+	return nil, false
 }
 
 // fetchDiningDashboardState GETs /user/dining-dashboard via the shared
